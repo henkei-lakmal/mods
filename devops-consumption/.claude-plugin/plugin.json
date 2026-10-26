@@ -1,6 +1,6 @@
 {
   "name": "devops-consumption",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "A pane tracking GitLab compute minutes, storage and seats, and Azure DevOps pipeline minutes, parallel jobs and licenses",
   "types": "./types/index.d.ts",
   "userConfig": {

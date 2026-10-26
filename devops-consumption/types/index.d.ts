@@ -53,6 +53,9 @@ export type Snapshot = {
   ado: AdoUsage | null
   mrs: ReviewQueue | null
   prs: ReviewQueue | null
+  // Who the data is read as: the glab account and the ADO identity.
+  gitlabUser: string
+  adoUser: string
   errors: string[]
   updatedAt: number | null
   isRefreshing: boolean

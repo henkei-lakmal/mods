@@ -12,7 +12,17 @@ const PLAN_MINUTES: Record<string, number> = { free: 400, premium: 10000, ultima
 // The ADO licenses worth a row; the rest of the summary is noise.
 const LICENSES = ['Basic', 'Basic + Test Plans', 'Stakeholder', 'Visual Studio Subscriber']
 
-const EMPTY: Snapshot = { gitlab: [], ado: null, mrs: null, prs: null, errors: [], updatedAt: null, isRefreshing: false }
+const EMPTY: Snapshot = {
+  gitlab: [],
+  ado: null,
+  mrs: null,
+  prs: null,
+  gitlabUser: '',
+  adoUser: '',
+  errors: [],
+  updatedAt: null,
+  isRefreshing: false,
+}
 const snapshot = atom({ plugin: 'devops-consumption', key: 'snapshot' } as const, EMPTY)
 const warned = atom({ plugin: 'devops-consumption', key: 'warned' } as const, [] as string[])
 // Groups unticked in the pane's Show row, as `gitlab:<path>` or `ado`; kept in
@@ -43,6 +53,7 @@ let discoveredTenant = ''
 let vaulted: { value: string; readAt: number } | null = null
 let gitlabUser = ''
 let adoUserId = ''
+let adoUserName = ''
 
 async function run($: EngineInterface, argv: string[]): Promise<string> {
   let done
@@ -60,6 +71,9 @@ async function run($: EngineInterface, argv: string[]): Promise<string> {
 }
 
 async function gitlab($: EngineInterface): Promise<GitlabNamespace[]> {
+  if (!gitlabUser) {
+    gitlabUser = JSON.parse(await run($, ['glab', 'api', 'user'])).username as string
+  }
   const listed: { id: number; full_path: string; kind: string }[] = JSON.parse(
     await run($, ['glab', 'api', 'namespaces?top_level_only=true&per_page=100']),
   )
@@ -139,6 +153,7 @@ async function adoReviews($: EngineInterface): Promise<ReviewQueue> {
   if (!adoUserId) {
     const me = await adoGet($, `https://dev.azure.com/${config.org}/_apis/connectionData`)
     adoUserId = me.authenticatedUser?.id ?? ''
+    adoUserName = me.authenticatedUser?.providerDisplayName ?? ''
   }
   const base = `https://dev.azure.com/${config.org}/_apis/git/pullrequests?searchCriteria.status=active&api-version=7.1`
   const [mine, all] = await Promise.all([
@@ -311,10 +326,16 @@ async function load($: EngineInterface): Promise<void> {
     ado: az ?? (config.org ? snap.ado : null),
     mrs: mrs ?? snap.mrs,
     prs: prs ?? (config.org ? snap.prs : null),
+    gitlabUser: gitlabUser || snap.gitlabUser,
+    adoUser: config.org ? adoUserName || snap.adoUser : '',
     errors,
     updatedAt: now,
     isRefreshing: false,
   }))
+
+  if (gl) {
+    await prune($, gl.map(ns => ns.path))
+  }
 
   // One toast per meter per month once it crosses the warning line.
   const month = new Date(now).toISOString().slice(0, 7)
@@ -326,15 +347,38 @@ async function load($: EngineInterface): Promise<void> {
     $.ui.toast(fresh.map(one => `${one.label}: ${percent(one)}% of quota`).join(' · '))
     await update($, warned, list => [...list, ...fresh.map(one => `${month} ${one.label}`)].slice(-50))
   }
-  const top = meters(next, off).sort((a, b) => ratio(b) - ratio(a))[0]
-  $.ui.status(top ? `${top.label.replace(' minutes', '')} ${percent(top)}% min` : undefined)
+  $.ui.status(statusFor(next, off))
+}
+
+// Claude Code draws a mod's status line as a pinned notice, with its warning
+// mark, so the line is kept for a meter past the warning percent alone.
+function statusFor(snap: Snapshot, off: string[]): string | undefined {
+  const top = meters(snap, off).sort((a, b) => ratio(b) - ratio(a))[0]
+  return top && ratio(top) * 100 >= config.warnAt ? `${top.label.replace(' minutes', '')} ${percent(top)}% min` : undefined
+}
+
+// Drops hidden and folded choices for GitLab namespaces no longer listed, as
+// after `glab` signs in as another account.
+async function prune($: EngineInterface, paths: string[]): Promise<void> {
+  const isGone = (path: string) => !paths.includes(path)
+  const off = await read($, hidden)
+  const keptOff = off.filter(id => !(id.startsWith('gitlab:') && isGone(id.slice('gitlab:'.length))))
+  if (keptOff.length !== off.length) {
+    await update($, hidden, () => keptOff)
+    await $.store.set('hidden', keptOff)
+  }
+  const folded = await read($, collapsed)
+  const keptFolded = folded.filter(key => !(key.startsWith('gl-') && isGone(key.slice('gl-'.length))))
+  if (keptFolded.length !== folded.length) {
+    await update($, collapsed, () => keptFolded)
+    await $.store.set('collapsed', keptFolded)
+  }
 }
 
 async function toggleGroup($: EngineInterface, id: string): Promise<void> {
   const next = await update($, hidden, list => (list.includes(id) ? list.filter(one => one !== id) : [...list, id]))
   await $.store.set('hidden', next)
-  const top = meters(await read($, snapshot), next).sort((a, b) => ratio(b) - ratio(a))[0]
-  $.ui.status(top ? `${top.label.replace(' minutes', '')} ${percent(top)}% min` : undefined)
+  $.ui.status(statusFor(await read($, snapshot), next))
 }
 
 async function toggleCard($: EngineInterface, key: string): Promise<void> {
@@ -366,6 +410,7 @@ export const register: Register = (on, options) => {
   vaulted = null
   gitlabUser = ''
   adoUserId = ''
+  adoUserName = ''
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -618,11 +663,12 @@ export const register: Register = (on, options) => {
     const adoCard = card(
       'ado',
       'Azure DevOps',
-      config.org || 'off',
+      config.org || 'off · adoOrg not set',
       <Box flexDirection="column">
         {!config.org && (
           <Text dimColor size="footnote">
-            Set the ADO organization in the mod's settings.
+            Off: adoOrg is not set. Options go in settings.json under pluginConfigs, keyed by the mod's full id
+            ({'devops-consumption@<marketplace>'}); see the README.
           </Text>
         )}
         {config.org && !snap.ado && adoErrors.length === 0 && (
@@ -650,6 +696,15 @@ export const register: Register = (on, options) => {
 
     return (
       <Box flexDirection="column">
+        {(snap.gitlabUser || snap.adoUser) && (
+          <Box paddingX={1}>
+            <Text dimColor size="caption" wrap="truncate-end">
+              {[snap.gitlabUser && `GitLab as @${snap.gitlabUser}`, snap.adoUser && `ADO as ${snap.adoUser}`]
+                .filter(Boolean)
+                .join(' · ')}
+            </Text>
+          </Box>
+        )}
         {showRow}
         {snap.gitlab.length === 0 &&
           card('gl-empty', 'GitLab', '', <Text dimColor>{snap.isRefreshing ? 'Loading…' : 'No namespaces loaded yet.'}</Text>)}

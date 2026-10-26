@@ -183,3 +183,54 @@ test('a group unticked in an earlier session stays hidden', OPTIONS, async ($, o
   expect(await ui.find({ key: 'fold-ado' })).toBeFalsy()
   await ui.unmount()
 })
+
+test('after an account switch: the account is named, stale choices go, a quiet meter sets no status', async ($, on) => {
+  mock.clock(on)
+  // The mod's store, in memory: saved while glab was signed in as an account
+  // that could see gone-group.
+  const saved: Record<string, unknown> = { hidden: ['gitlab:gone-group'], collapsed: ['gl-gone-group'] }
+  on('store.get', (_, e) => ({ value: saved[e.key] }))
+  on('store.set', (_, e) => {
+    saved[e.key] = e.value
+    return { value: undefined }
+  })
+  const statuses: (string | undefined)[] = []
+  on('command.register', () => ({ value: { command: 'consumption' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.status', (_, e) => {
+    statuses.push(e.text)
+    return { value: undefined }
+  })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('process.run', (_, e) => {
+    const argv = e.argv.join(' ')
+    if (argv.endsWith('api user')) {
+      return out({ username: 'dev-user' })
+    }
+    if (argv.includes('top_level_only')) {
+      return out([{ id: 7, full_path: 'acme-platform', kind: 'group' }])
+    }
+    if (argv.includes('namespaces/7')) {
+      return out({ plan: 'free', ci_minutes_usage: { monthly_minutes_used: 40 } })
+    }
+    if (argv.includes('graphql')) {
+      return out({ data: { namespace: { rootStorageStatistics: {} }, group: { mergeRequests: { count: 0 } } } })
+    }
+
+    return out([])
+  })
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'refresh' })
+
+  expect((await ui.find({ type: 'Text', text: /^GitLab as @dev-user$/ }))?.text).toBe('GitLab as @dev-user')
+  // ADO with no org says why it is off.
+  expect((await ui.find({ type: 'Text', text: /adoOrg not set/ }))?.text).toBe('off · adoOrg not set')
+  // 10% of 400 minutes is under the warning line: the status stays clear.
+  expect(statuses.length).toBeGreaterThan(0)
+  expect(statuses.every(text => text === undefined)).toBe(true)
+  expect(saved.hidden).toEqual([])
+  expect(saved.collapsed).toEqual([])
+  await ui.unmount()
+})
