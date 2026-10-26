@@ -1,0 +1,11 @@
+{
+  "name": "henkei-lakmal-mods",
+  "owner": { "name": "henkei-lakmal" },
+  "plugins": [
+    {
+      "name": "devops-consumption",
+      "source": "./devops-consumption",
+      "description": "A pane tracking GitLab and Azure DevOps consumption, merge requests and pull requests"
+    }
+  ]
+}

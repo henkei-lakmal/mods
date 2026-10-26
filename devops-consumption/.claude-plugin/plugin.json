@@ -1,0 +1,57 @@
+{
+  "name": "devops-consumption",
+  "version": "0.5.0",
+  "description": "A pane tracking GitLab compute minutes, storage and seats, and Azure DevOps pipeline minutes, parallel jobs and licenses",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "gitlabNamespaces": {
+      "type": "string",
+      "title": "GitLab namespaces",
+      "description": "Comma-separated top-level namespaces to track; empty tracks every one glab can see",
+      "default": ""
+    },
+    "gitlabMinutesQuota": {
+      "type": "number",
+      "title": "GitLab monthly compute minutes quota",
+      "description": "Overrides the plan default (free 400, premium 10000, ultimate 50000); 0 uses the plan default",
+      "default": 0
+    },
+    "adoOrg": {
+      "type": "string",
+      "title": "Azure DevOps organization",
+      "description": "The organization name in dev.azure.com/<org>; empty turns ADO tracking off",
+      "default": ""
+    },
+    "adoPatSecret": {
+      "type": "string",
+      "title": "Azure DevOps PAT in Key Vault",
+      "description": "vault/secret holding the PAT, read with az keyvault secret show (e.g. my-vault/ado-pat, cached an hour); used before the PAT field and az",
+      "default": ""
+    },
+    "adoPat": {
+      "type": "string",
+      "title": "Azure DevOps personal access token",
+      "description": "A PAT with Build (read), Member Entitlement Management (read) and Agent Pools (read); used instead of az when set",
+      "sensitive": true,
+      "default": ""
+    },
+    "adoTenant": {
+      "type": "string",
+      "title": "Azure DevOps tenant",
+      "description": "Entra tenant ID backing the ADO org, passed to az account get-access-token; empty reads it from the org",
+      "default": ""
+    },
+    "refreshMinutes": {
+      "type": "number",
+      "title": "Refresh interval (minutes)",
+      "description": "How often the pane refetches usage, at least 5",
+      "default": 30
+    },
+    "warnPercent": {
+      "type": "number",
+      "title": "Warn at percent of quota",
+      "description": "A meter turns amber and toasts once a month when it reaches this percent",
+      "default": 80
+    }
+  }
+}
